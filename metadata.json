@@ -1,0 +1,6 @@
+{
+  "name": "AeroCast Weather & Game",
+  "description": "A modern mobile-first weather forecast application featuring real-time GPS sensing, AI tips, a voice assistant, and an offline Tetris-style puzzle game.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
