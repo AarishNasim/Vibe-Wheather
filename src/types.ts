@@ -23,12 +23,11 @@ export interface CurrentWeather {
   country: string;
   lat?: number;
   lon?: number;
-  isCustomSearch?: boolean;
 }
 
 export interface ForecastDay {
-  date: string; // e.g., "YYYY-MM-DD" or name like "Mon"
-  day_of_week: string; // "Monday", "Tue", etc.
+  date: string;
+  day_of_week: string;
   temp_min_c: number;
   temp_max_c: number;
   temp_min_f: number;
@@ -37,10 +36,19 @@ export interface ForecastDay {
   humidity: number;
 }
 
+export interface HourlyForecast {
+  time: string;       // "HH:mm"
+  temp_c: number;
+  temp_f: number;
+  condition: WeatherCondition;
+  windspeed_kph: number;
+  humidity: number;
+}
+
 export interface AISuggestions {
   status: 'standard' | 'extreme' | 'warning';
   tips: string[];
-  alert?: string; // Storm, Rain or Extreme Temp warning if applicable
+  alert?: string;
 }
 
 export interface VoiceMessage {
@@ -55,4 +63,17 @@ export interface GameScore {
   score: number;
   highScore: number;
   linesCleared: number;
+}
+
+export interface User {
+  username: string;
+  loginTime: number;
+}
+
+export interface SavedCity {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  country: string;
 }
