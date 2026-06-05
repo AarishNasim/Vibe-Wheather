@@ -118,7 +118,7 @@ app.get("/api/weather", async (req: Request, res: Response): Promise<void> => {
   }
 
   try {
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min,relativehumidity_2m_max,windspeed_10m_max&timezone=auto`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min,relativehumidity_2m_max,windspeed_10m_max&hourly=temperature_2m,weathercode,windspeed_10m,relativehumidity_2m&timezone=auto&forecast_days=2`;
     const response = await fetch(weatherUrl);
 
     if (!response.ok) {
@@ -128,6 +128,7 @@ app.get("/api/weather", async (req: Request, res: Response): Promise<void> => {
     const data = (await response.json()) as any;
     const current = data.current_weather;
     const daily = data.daily;
+    const hourlyRaw = data.hourly;
 
     if (!current || !daily) {
       throw new Error("Unexpected API payload format");
@@ -139,6 +140,29 @@ app.get("/api/weather", async (req: Request, res: Response): Promise<void> => {
     const temp_f = (temp_c * 9) / 5 + 32;
     const wind_kph = current.windspeed;
     const wind_mph = wind_kph / 1.609;
+
+    // Process hourly data — find the next 24 hours from now
+    const nowISO = new Date().toISOString().slice(0, 13) + ":00";
+    let hourlyStartIdx = 0;
+    if (hourlyRaw?.time) {
+      const idx = (hourlyRaw.time as string[]).findIndex((t) => t >= nowISO);
+      hourlyStartIdx = idx >= 0 ? idx : 0;
+    }
+    const hourlyForecasts = hourlyRaw?.time
+      ? (hourlyRaw.time as string[]).slice(hourlyStartIdx, hourlyStartIdx + 24).map((timeStr, i) => {
+          const idx = hourlyStartIdx + i;
+          const hTc = hourlyRaw.temperature_2m[idx] ?? temp_c;
+          const hTf = (hTc * 9) / 5 + 32;
+          return {
+            time: timeStr.slice(11, 16),
+            temp_c: Math.round(hTc * 10) / 10,
+            temp_f: Math.round(hTf * 10) / 10,
+            condition: getWeatherConditionFromWmo(hourlyRaw.weathercode?.[idx] ?? current.weathercode),
+            windspeed_kph: Math.round((hourlyRaw.windspeed_10m?.[idx] ?? wind_kph) * 10) / 10,
+            humidity: hourlyRaw.relativehumidity_2m?.[idx] ?? 65,
+          };
+        })
+      : [];
 
     const weatherPayload = {
       current: {
@@ -173,6 +197,7 @@ app.get("/api/weather", async (req: Request, res: Response): Promise<void> => {
           humidity: daily.relativehumidity_2m_max ? daily.relativehumidity_2m_max[index] : 60,
         };
       }),
+      hourly: hourlyForecasts,
     };
 
     res.json(weatherPayload);
