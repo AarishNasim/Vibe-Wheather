@@ -45,6 +45,7 @@ export function getWeatherIcon(iconName: string, className = "w-6 h-6") {
   }
 }
 
+// TODO: Verify usage - potential dead code (exported but not imported anywhere currently)
 export function getDetailIcon(type: string, className = "w-5 h-5") {
   switch (type) {
     case "wind":

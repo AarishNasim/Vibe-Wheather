@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, Send, Sparkles, MessageSquare, Volume2, HelpCircle } from "lucide-react";
+import { Mic, MicOff, Send, Sparkles, MessageSquare, Volume2 } from "lucide-react";
 import { VoiceMessage, CurrentWeather } from "../types";
 
 interface VoiceAssistantProps {

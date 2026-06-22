@@ -9,14 +9,11 @@ import {
   MessageSquare, 
   Flame, 
   Settings, 
-  BellRing, 
   Moon, 
   Sun, 
   Sparkles,
-  RefreshCw,
-  Droplets
 } from "lucide-react";
-import { CurrentWeather, ForecastDay, AISuggestions } from "./types";
+import { CurrentWeather, ForecastDay, AISuggestions, HourlyDataPoint } from "./types";
 import WeatherDashboard from "./components/WeatherDashboard";
 import VoiceAssistant from "./components/VoiceAssistant";
 import BlockPuzzleGame from "./components/BlockPuzzleGame";
@@ -25,7 +22,7 @@ import LocationPermissionModal from "./components/LocationPermissionModal";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"weather" | "assistant" | "game" | "settings">("weather");
-  const [weatherData, setWeatherData] = useState<{ current: CurrentWeather; forecast: ForecastDay[] } | null>(null);
+  const [weatherData, setWeatherData] = useState<{ current: CurrentWeather; forecast: ForecastDay[]; hourly?: HourlyDataPoint[] } | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestions | null>(null);
   const [isCelsius, setIsCelsius] = useState<boolean>(() => {
     return localStorage.getItem("aero_is_celsius") !== "false";
@@ -255,7 +252,7 @@ export default function App() {
             <CloudSun className="w-20 h-20 text-cyan-400 animate-bounce" />
           </div>
           <h1 className="text-3xl font-bold text-gradient tracking-tight">AeroCast</h1>
-          <p className="text-xs text-cyan-300 font-mono tracking-widest uppercase mt-1">Sleek Mobile Suite v1.50</p>
+          <p className="text-xs text-cyan-300 font-mono tracking-widest uppercase mt-1">Sleek Mobile Suite v2.0</p>
           <div className="mt-8 flex gap-1.5 justify-center items-center">
             <span className="h-1.5 w-1.5 bg-cyan-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
             <span className="h-1.5 w-1.5 bg-cyan-400 rounded-full animate-bounce [animation-delay:-0.15s]" />

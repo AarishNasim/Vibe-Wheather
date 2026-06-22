@@ -6,10 +6,8 @@
 import React, { useState } from "react";
 import { 
   Settings, 
-  HelpCircle, 
   Smartphone, 
   RotateCcw, 
-  BellRing, 
   Globe, 
   Check, 
   Cpu, 

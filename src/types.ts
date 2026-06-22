@@ -52,6 +52,11 @@ export interface VoiceMessage {
   timestamp: string;
 }
 
+export interface HourlyDataPoint {
+  time: string;
+  temp: number;
+}
+
 export interface GameScore {
   score: number;
   highScore: number;

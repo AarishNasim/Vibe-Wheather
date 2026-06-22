@@ -5,6 +5,7 @@
 
 import express, { Request, Response } from "express";
 import path from "path";
+import os from "os";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -148,6 +149,83 @@ function getWeatherConditionFromWmo(code: number): { text: string; code: number;
 // Convert days of week
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// ─── Shared Mock Response Helpers ────────────────────────────────────
+// Extracted from duplicated blocks to keep DRY.
+
+interface ConditionLike {
+  text: string;
+  code?: number;
+}
+
+/**
+ * Generates mock AI tips and alert based on the current weather condition.
+ * Used when the Gemini API key is missing or when the API call fails.
+ */
+function generateMockAiTips(condition: ConditionLike) {
+  let tips = [
+    "Excellent window to enjoy a fresh, breezy outdoor walk details.",
+    "Stay hydrated! Keep safe from UV radiation under shade.",
+    "Keep an eye out for dynamic wind condition shifts."
+  ];
+  let alertText: string | null = null;
+  let status: "standard" | "warning" | "extreme" = "standard";
+
+  if (condition.text.includes("Rain") || condition.text.includes("Drizzle")) {
+    tips = [
+      "Pack an umbrella! Slight moisture droplets forecast today.",
+      "Perfect time for dynamic indoor gaming or baking sweet treats.",
+      "Wet streets could be slippery, maintain cautious driving."
+    ];
+    alertText = "Rain Warning: Droplets detected. Carry an umbrella!";
+    status = "warning";
+  } else if (condition.text.includes("Thunderstorm") || condition.text.includes("Lightning")) {
+    tips = [
+      "Find sturdy, dry shelter and disconnect unnecessary appliances.",
+      "Postpone standard outdoor runs until dynamic cloud bursts pass over.",
+      "Keep cozy and engage with our exciting Block Puzzle offline mini-game!"
+    ];
+    alertText = "Thunderstorm Alert: High-voltage cloud discharges. Avoid outdoor areas!";
+    status = "extreme";
+  }
+
+  return { status, tips, alert: alertText };
+}
+
+/**
+ * Generates mock voice assistant replies based on the user's query.
+ * Used when the Gemini API key is missing or when the API call fails.
+ */
+function generateMockVoiceReply(
+  query: string,
+  weatherContext?: { condition: ConditionLike; temp_c?: number; feelslike_c?: number } | null
+) {
+  const textQuery = query.toLowerCase();
+
+  if (textQuery.includes("game") || textQuery.includes("play") || textQuery.includes("puzzle")) {
+    return "To access the game, click on the direct 'Block Puzzle' module below! It is completely offline-ready and preserves score history.";
+  }
+  if (textQuery.includes("rain") || textQuery.includes("umbrella") || textQuery.includes("wet")) {
+    if (weatherContext?.condition.text.includes("Rain") || weatherContext?.condition.text.includes("Thunderstorm")) {
+      return "Yes, it looks wet. Carry an umbrella or find cozy cover!";
+    }
+    return "Clear skies! Currently, no raindrops are expected soon.";
+  }
+  if (textQuery.includes("advice") || textQuery.includes("tip") || textQuery.includes("suggest") || textQuery.includes("what to do")) {
+    return weatherContext?.condition.text.includes("Rain")
+      ? "My advice: Stay indoors and enjoy a hot beverage, it's raining!"
+      : "My advice: Great weather for a walk outside! Stay hydrated.";
+  }
+  if (textQuery.includes("temp") || textQuery.includes("hot") || textQuery.includes("cold") || textQuery.includes("warm") || textQuery.includes("cool")) {
+    return `The temperature is ${weatherContext?.temp_c || 20}°C. It feels like ${weatherContext?.feelslike_c || 20}°C.`;
+  }
+  if (textQuery.includes("hello") || textQuery.includes("hi") || textQuery.includes("hey")) {
+    return `Hello there! I'm AeroCast AI. How can I help you with the weather today?`;
+  }
+
+  const fallbackTopic = query.split(" ")[0].substring(0, 15);
+  return `You asked about "${fallbackTopic}...". Currently it feels like ${weatherContext?.temp_c || 20}°C here. (Note: Running in Demo Mode).`;
+}
+
 // ─── API Routes ──────────────────────────────────────────────────────
 
 // 1. Geocoding search route using Open-Meteo free API
@@ -223,7 +301,7 @@ app.get("/api/search", validateRequest(searchQuerySchema, "query"), async (req: 
       c => c.name.toLowerCase().includes(lowerQuery) || c.country.toLowerCase().includes(lowerQuery) || c.admin1.toLowerCase().includes(lowerQuery)
     );
     
-    // If no match, just return the first few or a simulated dynamic result
+    // If no match, just return a simulated dynamic result
     const results = filtered.length > 0 ? filtered : [
       { name: query.charAt(0).toUpperCase() + query.slice(1), country: "Simulated", admin1: "Offline Area", latitude: 26.22, longitude: 84.36 }
     ];
@@ -232,7 +310,7 @@ app.get("/api/search", validateRequest(searchQuerySchema, "query"), async (req: 
   }
 });
 
-// 2. Fetch meteorological data using Open-Meteo API
+// 2. Fetch meteorological data using Open-Meteo API (now includes hourly temperature)
 app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req: Request, res: Response): Promise<void> => {
   const lat = parseFloat(req.query.lat as string);
   const lon = parseFloat(req.query.lon as string);
@@ -245,7 +323,7 @@ app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req
   }
 
   try {
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=weather_code,temperature_2m_max,temperature_2m_min,relative_humidity_2m_max,wind_speed_10m_max&timezone=auto`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m&daily=weather_code,temperature_2m_max,temperature_2m_min,relative_humidity_2m_max,wind_speed_10m_max&timezone=auto`;
     const response = await fetch(weatherUrl);
 
     if (!response.ok) {
@@ -260,6 +338,7 @@ app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req
     const data = (await response.json()) as any;
     const current = data.current_weather;
     const daily = data.daily;
+    const hourly = data.hourly;
 
     if (!current || !daily) {
       throw new Error("Unexpected API payload format");
@@ -271,6 +350,26 @@ app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req
     const temp_f = (temp_c * 9) / 5 + 32;
     const wind_kph = current.windspeed;
     const wind_mph = wind_kph / 1.609;
+
+    // Extract next 24 hours of hourly temperature data for the trend chart
+    let hourlyTemps: { time: string; temp: number }[] = [];
+    if (hourly?.time && hourly?.temperature_2m) {
+      const now = new Date();
+      const nowISO = now.toISOString();
+      // Find the index closest to the current hour
+      let startIdx = 0;
+      for (let i = 0; i < hourly.time.length; i++) {
+        if (hourly.time[i] >= nowISO.slice(0, 13)) {
+          startIdx = i;
+          break;
+        }
+      }
+      // Take next 24 hours
+      hourlyTemps = hourly.time.slice(startIdx, startIdx + 24).map((t: string, i: number) => ({
+        time: t,
+        temp: hourly.temperature_2m[startIdx + i],
+      }));
+    }
 
     const weatherPayload = {
       current: {
@@ -306,6 +405,7 @@ app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req
           humidity: daily.relative_humidity_2m_max ? daily.relative_humidity_2m_max[index] : 60,
         };
       }),
+      hourly: hourlyTemps,
     };
 
     res.json(weatherPayload);
@@ -324,6 +424,17 @@ app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req
       const d = new Date();
       d.setDate(d.getDate() + i);
       return d.toISOString().split("T")[0];
+    });
+
+    // Generate mock hourly data (24 hours, sinusoidal temperature curve)
+    const mockHourly = Array.from({ length: 24 }, (_, i) => {
+      const hour = new Date();
+      hour.setMinutes(0, 0, 0);
+      hour.setHours(hour.getHours() + i);
+      return {
+        time: hour.toISOString().slice(0, 16),
+        temp: Math.round((temp_c + Math.sin((i - 6) * Math.PI / 12) * 4) * 10) / 10,
+      };
     });
 
     const mockPayload = {
@@ -361,6 +472,7 @@ app.get("/api/weather", validateRequest(weatherQuerySchema, "query"), async (req
           humidity: 60 + Math.round(Math.sin(index) * 10),
         };
       }),
+      hourly: mockHourly,
     };
 
     res.json(mockPayload);
@@ -397,33 +509,7 @@ Return the response in strict JSON format:
   if (!ai) {
     // Mock simulation response if API key is not yet configured
     console.log("Gemini Key missing - providing dynamic simulated weather tips.");
-    let tips = [
-      "Excellent window to enjoy a fresh, breezy outdoor walk details.",
-      "Stay hydrated! Keep safe from UV radiation under shade.",
-      "Keep an eye out for dynamic wind condition shifts."
-    ];
-    let alertText: string | null = null;
-    let status: "standard" | "warning" | "extreme" = "standard";
-
-    if (condition.text.includes("Rain") || condition.text.includes("Drizzle")) {
-      tips = [
-        "Pack an umbrella! Slight moisture droplets forecast today.",
-        "Perfect time for dynamic indoor gaming or baking sweet treats.",
-        "Wet streets could be slippery, maintain cautious driving."
-      ];
-      alertText = "Rain Warning: Droplets detected. Carry an umbrella!";
-      status = "warning";
-    } else if (condition.text.includes("Thunderstorm") || condition.text.includes("Lightning")) {
-      tips = [
-        "Find sturdy, dry shelter and disconnect unnecessary appliances.",
-        "Postpone standard outdoor runs until dynamic cloud bursts pass over.",
-        "Keep cozy and engage with our exciting Block Puzzle offline mini-game!"
-      ];
-      alertText = "Thunderstorm Alert: High-voltage cloud discharges. Avoid outdoor areas!";
-      status = "extreme";
-    }
-
-    res.json({ status, tips, alert: alertText });
+    res.json(generateMockAiTips(condition));
     return;
   }
 
@@ -442,34 +528,7 @@ Return the response in strict JSON format:
     res.json(parsed);
   } catch (error: any) {
     console.warn("⚠️ Gemini Suggestions request failed, falling back to simulated tips. Details:", error.message || error);
-    
-    let tips = [
-      "Excellent window to enjoy a fresh, breezy outdoor walk details.",
-      "Stay hydrated! Keep safe from UV radiation under shade.",
-      "Keep an eye out for dynamic wind condition shifts."
-    ];
-    let alertText: string | null = null;
-    let status: "standard" | "warning" | "extreme" = "standard";
-
-    if (condition.text.includes("Rain") || condition.text.includes("Drizzle")) {
-      tips = [
-        "Pack an umbrella! Slight moisture droplets forecast today.",
-        "Perfect time for dynamic indoor gaming or baking sweet treats.",
-        "Wet streets could be slippery, maintain cautious driving."
-      ];
-      alertText = "Rain Warning: Droplets detected. Carry an umbrella!";
-      status = "warning";
-    } else if (condition.text.includes("Thunderstorm") || condition.text.includes("Lightning")) {
-      tips = [
-        "Find sturdy, dry shelter and disconnect unnecessary appliances.",
-        "Postpone standard outdoor runs until dynamic cloud bursts pass over.",
-        "Keep cozy and engage with our exciting Block Puzzle offline mini-game!"
-      ];
-      alertText = "Thunderstorm Alert: High-voltage cloud discharges. Avoid outdoor areas!";
-      status = "extreme";
-    }
-
-    res.json({ status, tips, alert: alertText });
+    res.json(generateMockAiTips(condition));
   }
 });
 
@@ -495,29 +554,7 @@ Address the query naturally, referencing the weather. Keep your response spoken-
 
   if (!ai) {
     // Dynamic mock response when key is absent
-    const textQuery = query.toLowerCase();
-    let reply = "";
-    if (textQuery.includes("game") || textQuery.includes("play") || textQuery.includes("puzzle")) {
-      reply = "To access the game, click on the direct 'Block Puzzle' module below! It is completely offline-ready and preserves score history.";
-    } else if (textQuery.includes("rain") || textQuery.includes("umbrella") || textQuery.includes("wet")) {
-      if (weatherContext?.condition.text.includes("Rain") || weatherContext?.condition.text.includes("Thunderstorm")) {
-        reply = "Yes, it looks wet. Carry an umbrella or find cozy cover!";
-      } else {
-        reply = "Clear skies! Currently, no raindrops are expected soon.";
-      }
-    } else if (textQuery.includes("advice") || textQuery.includes("tip") || textQuery.includes("suggest") || textQuery.includes("what to do")) {
-      reply = weatherContext?.condition.text.includes("Rain") 
-        ? "My advice: Stay indoors and enjoy a hot beverage, it's raining!" 
-        : "My advice: Great weather for a walk outside! Stay hydrated.";
-    } else if (textQuery.includes("temp") || textQuery.includes("hot") || textQuery.includes("cold") || textQuery.includes("warm") || textQuery.includes("cool")) {
-      reply = `The temperature is ${weatherContext?.temp_c || 20}°C. It feels like ${weatherContext?.feelslike_c || 20}°C.`;
-    } else if (textQuery.includes("hello") || textQuery.includes("hi") || textQuery.includes("hey")) {
-      reply = `Hello there! I'm AeroCast AI. How can I help you with the weather today?`;
-    } else {
-      const fallbackTopic = query.split(" ")[0].substring(0, 15);
-      reply = `You asked about "${fallbackTopic}...". Currently it feels like ${weatherContext?.temp_c || 20}°C here. (Note: Running in Demo Mode).`;
-    }
-    res.json({ reply });
+    res.json({ reply: generateMockVoiceReply(query, weatherContext) });
     return;
   }
 
@@ -534,30 +571,7 @@ Address the query naturally, referencing the weather. Keep your response spoken-
     res.json({ reply: response.text.trim() });
   } catch (err: any) {
     console.warn("⚠️ Gemini Voice Assistant request failed, falling back to simulated dialogue. Details:", err.message || err);
-    
-    const textQuery = query.toLowerCase();
-    let reply = "";
-    if (textQuery.includes("game") || textQuery.includes("play") || textQuery.includes("puzzle")) {
-      reply = "To access the game, click on the direct 'Block Puzzle' module below! It is completely offline-ready and preserves score history.";
-    } else if (textQuery.includes("rain") || textQuery.includes("umbrella") || textQuery.includes("wet")) {
-      if (weatherContext?.condition.text.includes("Rain") || weatherContext?.condition.text.includes("Thunderstorm")) {
-        reply = "Yes, it looks wet. Carry an umbrella or find cozy cover!";
-      } else {
-        reply = "Clear skies! Currently, no raindrops are expected soon.";
-      }
-    } else if (textQuery.includes("advice") || textQuery.includes("tip") || textQuery.includes("suggest") || textQuery.includes("what to do")) {
-      reply = weatherContext?.condition.text.includes("Rain") 
-        ? "My advice: Stay indoors and enjoy a hot beverage, it's raining!" 
-        : "My advice: Great weather for a walk outside! Stay hydrated.";
-    } else if (textQuery.includes("temp") || textQuery.includes("hot") || textQuery.includes("cold") || textQuery.includes("warm") || textQuery.includes("cool")) {
-      reply = `The temperature is ${weatherContext?.temp_c || 20}°C. It feels like ${weatherContext?.feelslike_c || 20}°C.`;
-    } else if (textQuery.includes("hello") || textQuery.includes("hi") || textQuery.includes("hey")) {
-      reply = `Hello there! I'm AeroCast AI. How can I help you with the weather today?`;
-    } else {
-      const fallbackTopic = query.split(" ")[0].substring(0, 15);
-      reply = `You asked about "${fallbackTopic}...". Currently it feels like ${weatherContext?.temp_c || 20}°C here. (Note: Running in Demo Mode).`;
-    }
-    res.json({ reply });
+    res.json({ reply: generateMockVoiceReply(query, weatherContext) });
   }
 });
 
@@ -625,6 +639,21 @@ app.delete("/api/auth/session", (req: Request, res: Response): void => {
   });
 });
 
+// ─── Helper: Get Local Network IP ───────────────────────────────────
+
+function getLocalNetworkIP(): string {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      // Skip internal (loopback) and non-IPv4 addresses
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "127.0.0.1";
+}
+
 // ─── Server Startup ──────────────────────────────────────────────────
 
 async function startServer() {
@@ -662,8 +691,21 @@ async function startServer() {
         app
       );
 
-      httpsServer.listen(PORT, "0.0.0.0", () => {
-        console.log(`🔐 HTTPS Server running on https://localhost:${PORT}`);
+      httpsServer.listen(PORT, "0.0.0.0", async () => {
+        const networkIP = getLocalNetworkIP();
+        console.log("\n  🔐 HTTPS Server running:\n");
+        console.log(`     → Local:   https://localhost:${PORT}`);
+        console.log(`     → Network: https://${networkIP}:${PORT}\n`);
+
+        // Auto-open browser in dev mode
+        if (process.env.NODE_ENV !== "production") {
+          try {
+            const { default: open } = await import("open");
+            await open(`https://localhost:${PORT}`);
+          } catch (_) {
+            // Gracefully ignore if browser fails to open
+          }
+        }
       });
       return; // Skip HTTP server if HTTPS is active
     } else {
@@ -673,8 +715,21 @@ async function startServer() {
   }
 
   // Default HTTP server
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, "0.0.0.0", async () => {
+    const networkIP = getLocalNetworkIP();
+    console.log("\n  🌤️  AeroCast Server running:\n");
+    console.log(`     → Local:   http://localhost:${PORT}`);
+    console.log(`     → Network: http://${networkIP}:${PORT}\n`);
+
+    // Auto-open browser in dev mode
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const { default: open } = await import("open");
+        await open(`http://localhost:${PORT}`);
+      } catch (_) {
+        // Gracefully ignore if browser fails to open or port is busy
+      }
+    }
   });
 }
 

@@ -12,16 +12,19 @@ import {
   Droplets, 
   Sun, 
   Sparkles, 
-  CloudRain, 
-  Info, 
   BellRing,
   RefreshCw
 } from "lucide-react";
-import { CurrentWeather, ForecastDay, AISuggestions } from "../types";
+import { CurrentWeather, ForecastDay, AISuggestions, HourlyDataPoint } from "../types";
 import { getWeatherIcon } from "../utils/weatherIcons";
+import GlassCard from "./ui/GlassCard";
+import GranularDataCard from "./ui/GranularDataCard";
+import WeatherSkeleton from "./ui/WeatherSkeleton";
+import TemperatureTrendChart from "./ui/TemperatureTrendChart";
+import ThunderstormBackground from "./ui/ThunderstormBackground";
 
 interface WeatherDashboardProps {
-  weatherData: { current: CurrentWeather; forecast: ForecastDay[] } | null;
+  weatherData: { current: CurrentWeather; forecast: ForecastDay[]; hourly?: HourlyDataPoint[] } | null;
   aiSuggestions: AISuggestions | null;
   onSearch: (city: string, lat?: number, lon?: number) => void;
   onDetectLocation: () => void;
@@ -102,29 +105,14 @@ export default function WeatherDashboard({
     return "from-sky-900/10 via-slate-800 to-slate-950";
   };
 
-  // Falling particles for background mood
+  // Background particles for non-storm conditions
   const renderBackgroundParticles = () => {
     if (!weatherData) return null;
     const cond = weatherData.current.condition.text.toLowerCase();
 
-    if (cond.includes("rain") || cond.includes("drizzle")) {
-      return (
-        <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 opacity-40">
-          {Array.from({ length: 15 }).map((_, idx) => (
-            <div
-              key={`rain-${idx}`}
-              className="rain-drop"
-              style={{
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * -50}px`,
-                height: `${10 + Math.random() * 20}px`,
-                animationDelay: `${Math.random() * 2}s`,
-                animationDuration: `${0.6 + Math.random() * 0.4}s`,
-              }}
-            />
-          ))}
-        </div>
-      );
+    // Storm/rain backgrounds are handled by ThunderstormBackground
+    if (cond.includes("rain") || cond.includes("drizzle") || cond.includes("thunderstorm") || cond.includes("lightning") || cond.includes("storm") || cond.includes("shower")) {
+      return <ThunderstormBackground condition={weatherData.current.condition.text} intensity={cond.includes("thunderstorm") || cond.includes("heavy") ? 2 : 1} />;
     }
 
     if (cond.includes("fog") || cond.includes("cloudy") || cond.includes("overcast")) {
@@ -161,6 +149,31 @@ export default function WeatherDashboard({
   };
 
   const curr = weatherData?.current;
+
+  // ── Expanded detail content for GranularDataCards ──
+  const getHumidityDetails = (humidity: number) => (
+    <div>
+      <p>Comfort Level: <span className="text-cyan-400 font-semibold">{humidity < 40 ? "Dry — consider a humidifier" : humidity < 60 ? "Comfortable" : humidity < 80 ? "Muggy — may feel sticky" : "Very Humid — sweat evaporation slowed"}</span></p>
+      <p className="mt-1 text-[10px] text-slate-400">Ideal indoor range: 30–50%</p>
+    </div>
+  );
+
+  const getWindDetails = (kph: number) => {
+    const beaufort = kph < 1 ? "Calm" : kph < 6 ? "Light Air" : kph < 12 ? "Light Breeze" : kph < 20 ? "Gentle Breeze" : kph < 29 ? "Moderate Breeze" : kph < 39 ? "Fresh Breeze" : kph < 50 ? "Strong Breeze" : "Near Gale+";
+    return (
+      <div>
+        <p>Beaufort Scale: <span className="text-cyan-400 font-semibold">{beaufort}</span></p>
+        <p className="mt-1 text-[10px] text-slate-400">{kph > 40 ? "⚠️ Secure loose outdoor items" : "Safe for outdoor activities"}</p>
+      </div>
+    );
+  };
+
+  const getUVDetails = (uv: number) => (
+    <div>
+      <p>Protection Advice: <span className="text-cyan-400 font-semibold">{uv <= 2 ? "No protection needed" : uv <= 5 ? "Wear sunglasses on bright days" : uv <= 7 ? "SPF 30+ sunscreen recommended" : "Avoid midday sun, seek shade"}</span></p>
+      <p className="mt-1 text-[10px] text-slate-400">Scale: 0–2 Low · 3–5 Moderate · 6–7 High · 8+ Very High</p>
+    </div>
+  );
 
   return (
     <div className={`relative min-h-[500px] bg-gradient-to-b ${getWeatherBackground()} rounded-3xl p-5 shadow-2xl border border-white/10 overflow-hidden transition-all duration-700 font-sans`}>
@@ -245,14 +258,11 @@ export default function WeatherDashboard({
         )}
  
         {isLoading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="h-10 w-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4" />
-            <span className="text-xs font-medium text-slate-300">Synchronizing satellite metrics...</span>
-          </div>
+          <WeatherSkeleton />
         ) : curr ? (
           <div className="space-y-5">
             {/* CURRENT WEATHER OVERVIEW HEADER CARD */}
-            <div className="glass flex flex-col items-center text-center py-6 rounded-3xl relative overflow-hidden">
+            <GlassCard variant="heavy" className="flex flex-col items-center text-center py-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-[80px]" />
               <div className="flex items-center gap-1.5 text-slate-400 mb-1 flex-wrap justify-center">
                 <MapPin className="w-3.5 h-3.5 text-cyan-400" />
@@ -279,51 +289,44 @@ export default function WeatherDashboard({
               <span className="px-3.5 py-1 bg-cyan-500/10 border border-cyan-500/20 rounded-full text-[10px] font-bold text-cyan-300 tracking-wide mt-1 uppercase">
                 {curr.condition.text}
               </span>
-            </div>
+            </GlassCard>
  
-            {/* DETAILED WEATHER SPECIFICATIONS */}
+            {/* DETAILED WEATHER SPECIFICATIONS — Interactive GranularDataCards */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="glass p-4 rounded-3xl flex items-center gap-3">
-                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
-                  <Droplets className="w-5 h-5 text-cyan-400 fill-cyan-400/10" />
-                </div>
-                <div>
-                  <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Humidity</span>
-                  <span className="font-mono text-sm font-bold text-slate-100">{curr.humidity}%</span>
-                </div>
-              </div>
- 
-              <div className="glass p-4 rounded-3xl flex items-center gap-3">
-                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
-                  <Wind className="w-5 h-5 text-cyan-400" />
-                </div>
-                <div>
-                  <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Wind Speed</span>
-                  <span className="font-mono text-sm font-bold text-slate-100">
-                    {isCelsius ? `${curr.wind_kph} km/h` : `${curr.wind_mph} mph`}
-                  </span>
-                </div>
-              </div>
- 
-              <div className="glass p-4 rounded-3xl flex items-center gap-3 col-span-2">
-                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
-                  <Sun className="w-5 h-5 text-cyan-400 fill-cyan-400/10" />
-                </div>
-                <div className="flex-1 flex justify-between items-center pr-2">
-                  <div>
-                    <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">UV Index</span>
-                    <span className="font-mono text-sm font-bold text-slate-100">{curr.uv} of 10</span>
-                  </div>
-                  <span className="text-[10px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-lg font-mono">
-                    {curr.uv >= 6 ? "High Risk" : "Normal"}
-                  </span>
-                </div>
-              </div>
+              <GranularDataCard
+                icon={<Droplets className="w-5 h-5 text-cyan-400 fill-cyan-400/10" />}
+                label="Humidity"
+                value={`${curr.humidity}%`}
+                details={getHumidityDetails(curr.humidity)}
+              />
+
+              <GranularDataCard
+                icon={<Wind className="w-5 h-5 text-cyan-400" />}
+                label="Wind Speed"
+                value={isCelsius ? `${curr.wind_kph} km/h` : `${curr.wind_mph} mph`}
+                details={getWindDetails(curr.wind_kph)}
+              />
+
+              <GranularDataCard
+                icon={<Sun className="w-5 h-5 text-cyan-400 fill-cyan-400/10" />}
+                label="UV Index"
+                value={`${curr.uv} of 10`}
+                details={getUVDetails(curr.uv)}
+                fullWidth
+              />
             </div>
+
+            {/* TEMPERATURE TREND CHART */}
+            {weatherData.hourly && weatherData.hourly.length > 0 && (
+              <TemperatureTrendChart
+                hourlyData={weatherData.hourly}
+                isCelsius={isCelsius}
+              />
+            )}
  
             {/* AI SUGGESTIONS SHEET SECTION */}
             {aiSuggestions && (
-              <div className="glass rounded-3xl p-5 relative overflow-hidden">
+              <GlassCard className="p-5 relative overflow-hidden">
                 <div className="absolute -top-10 -right-10 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl" />
                 <div className="flex justify-between items-center mb-3">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-400 uppercase tracking-widest">
@@ -340,7 +343,7 @@ export default function WeatherDashboard({
                     </div>
                   ))}
                 </div>
-              </div>
+              </GlassCard>
             )}
  
             {/* 5-DAY WEATHER FORECAST CONTAINER */}
@@ -348,9 +351,9 @@ export default function WeatherDashboard({
               <h4 className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-3 px-1">5-Day Meteorological Trend</h4>
               <div className="space-y-2">
                 {weatherData.forecast.map((day, idx) => (
-                  <div
+                  <GlassCard
                     key={idx}
-                    className={`glass flex items-center justify-between p-3.5 rounded-2xl hover:bg-white/10 transition duration-150 ${idx === 0 ? 'border-b-4 border-cyan-500/50' : ''}`}
+                    className={`flex items-center justify-between p-3.5 hover:bg-white/10 transition duration-150 ${idx === 0 ? 'border-b-4 border-cyan-500/50' : ''}`}
                   >
                     <div className="w-14">
                       <span className="block text-xs font-bold text-slate-100">{day.day_of_week}</span>
@@ -377,14 +380,14 @@ export default function WeatherDashboard({
                         </span>
                       </div>
                     </div>
-                  </div>
+                  </GlassCard>
                 ))}
               </div>
             </div>
           </div>
         ) : (
-          <div className="glass rounded-3xl p-8 text-center flex flex-col items-center">
-            <Info className="w-8 h-8 text-slate-400 mb-3" />
+          <GlassCard variant="heavy" className="p-8 text-center flex flex-col items-center">
+            <Search className="w-8 h-8 text-slate-400 mb-3" />
             <p className="text-slate-300 text-xs mb-4">No meteorological metrics detected. Click or search for a location.</p>
             <button
               id="btn-trigger-geocomplete"
@@ -393,7 +396,7 @@ export default function WeatherDashboard({
             >
               Locate Now
             </button>
-          </div>
+          </GlassCard>
         )}
       </div>
     </div>
