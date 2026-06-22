@@ -21,6 +21,7 @@ import WeatherDashboard from "./components/WeatherDashboard";
 import VoiceAssistant from "./components/VoiceAssistant";
 import BlockPuzzleGame from "./components/BlockPuzzleGame";
 import SettingsPanel from "./components/SettingsPanel";
+import LocationPermissionModal from "./components/LocationPermissionModal";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"weather" | "assistant" | "game" | "settings">("weather");
@@ -36,6 +37,9 @@ export default function App() {
   const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true); // default to dark atmospheric interface
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
+  const [locationLoading, setLocationLoading] = useState<boolean>(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // Load cached weather from LocalStorage on mount (Offline Support!)
   useEffect(() => {
@@ -142,7 +146,17 @@ export default function App() {
 
       const response = await fetch(queryUrl);
       if (!response.ok) {
-        throw new Error("Failed to fetch weather data from API");
+        let errMsg = "Failed to fetch weather data from API";
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errMsg = errData.error;
+            if (errData.details) {
+              errMsg += ` (${errData.details})`;
+            }
+          }
+        } catch (_) {}
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
@@ -155,42 +169,56 @@ export default function App() {
       await fetchAiSuggestions(data.current);
     } catch (err: any) {
       console.error("Weather error details:", err);
-      alert("Failed to retrieve live metrics. Displaying cached weather offline.");
+      alert(`Failed to retrieve live metrics: ${err.message || err}`);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Default fallback city: Siwan, Bihar, India
+  const FALLBACK_CITY = "Siwan";
+  const FALLBACK_LAT = 26.22;
+  const FALLBACK_LON = 84.36;
+
   // Auto-detect user Coordinates GPS location
   const handleDetectLocation = () => {
     if (!navigator.geolocation) {
       alert("GPS Geolocation index is not supported on this browser. Searching default location.");
-      handleGeoSearch("New York", 40.7128, -74.0060);
+      handleGeoSearch(FALLBACK_CITY, FALLBACK_LAT, FALLBACK_LON);
       return;
     }
 
     setIsLoading(true);
+    setLocationLoading(true);
+    setLocationError(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
+        setLocationLoading(false);
+        setShowLocationModal(false);
         handleGeoSearch("My Location", latitude, longitude);
       },
       (err) => {
         console.warn("Geolocation permission error: ", err);
-        // Fallback or alert
-        alert("Geolocation permission denied or timed out. Fetching default New York metrics.");
-        handleGeoSearch("New York", 40.7128, -74.0060);
+        setLocationLoading(false);
+        setLocationError(
+          err.code === 1
+            ? "Location permission was denied. You can search manually or try again."
+            : "Could not determine your location. Please try again or search manually."
+        );
+        // Fallback to Siwan, Bihar
+        handleGeoSearch(FALLBACK_CITY, FALLBACK_LAT, FALLBACK_LON);
       },
-      { enableHighAccuracy: true, timeout: 6000 }
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
     );
   };
 
-  // Geolocation auto trigger on first launch if no cached payload
+  // Geolocation soft-prompt on first launch if no cached payload
   useEffect(() => {
     const cache = localStorage.getItem("aero_cached_weather");
     if (!cache) {
-      // Auto-detect
-      handleDetectLocation();
+      // Show soft-prompt modal instead of aggressively requesting GPS
+      setShowLocationModal(true);
     }
   }, []);
 
@@ -199,6 +227,26 @@ export default function App() {
       isDarkMode ? "bg-[#0f172a] text-white" : "bg-slate-50 text-slate-900"
     }`}>
       
+      {/* 0. Geolocation Soft-Prompt Modal */}
+      <LocationPermissionModal
+        isOpen={showLocationModal && !isSplashActive}
+        isLoading={locationLoading}
+        error={locationError}
+        onAllow={() => {
+          setLocationError(null);
+          handleDetectLocation();
+        }}
+        onSkip={() => {
+          setShowLocationModal(false);
+          setLocationError(null);
+          handleGeoSearch(FALLBACK_CITY, FALLBACK_LAT, FALLBACK_LON);
+        }}
+        onClose={() => {
+          setShowLocationModal(false);
+          setLocationError(null);
+        }}
+      />
+
       {/* 1. Splash Screen Overlay */}
       {isSplashActive && (
         <div className="fixed inset-0 bg-gradient-to-br from-cyan-950 via-slate-950 to-[#0f172a] z-50 flex flex-col items-center justify-center text-center p-4">

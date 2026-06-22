@@ -254,9 +254,14 @@ export default function WeatherDashboard({
             {/* CURRENT WEATHER OVERVIEW HEADER CARD */}
             <div className="glass flex flex-col items-center text-center py-6 rounded-3xl relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-[80px]" />
-              <div className="flex items-center gap-1.5 text-slate-400 mb-1">
+              <div className="flex items-center gap-1.5 text-slate-400 mb-1 flex-wrap justify-center">
                 <MapPin className="w-3.5 h-3.5 text-cyan-400" />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{curr.city}</span>
+                {curr.isOfflineFallback && (
+                  <span className="text-[8px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold uppercase tracking-wider animate-pulse">
+                    Demo Mode
+                  </span>
+                )}
               </div>
  
               <div className="my-2.5 flex items-center justify-center gap-5">

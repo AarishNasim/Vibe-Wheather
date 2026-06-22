@@ -24,6 +24,7 @@ export interface CurrentWeather {
   lat?: number;
   lon?: number;
   isCustomSearch?: boolean;
+  isOfflineFallback?: boolean;
 }
 
 export interface ForecastDay {
